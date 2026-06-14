@@ -1,0 +1,22 @@
+[Unit]
+Description=Kibitz LAN relay (offline video-call rendezvous)
+# Wait for the network so the relay can enumerate LAN addresses on first start.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# StateDirectory makes /var/lib/kibitz-offline (owned by this service) — the
+# permanent identity (relay-state.json) and relay-link.txt live there, so the
+# join code survives reboots. Pair with a STATIC IP and it never changes.
+StateDirectory=kibitz-offline
+ExecStart=/usr/local/bin/kibitz-offline \
+  --base https://kibitz.chat \
+  --state /var/lib/kibitz-offline/relay-state.json \
+  --http 8080
+Restart=always
+RestartSec=3
+# If no LAN address yet (network still settling), the relay exits and systemd
+# retries until the network is up — Restart=always covers that.
+
+[Install]
+WantedBy=multi-user.target

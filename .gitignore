@@ -1,0 +1,13 @@
+# Built binaries live in GitHub Releases, never in git (keeps the repo tiny and
+# the source easy to audit). `./build.sh` drops them here.
+/dist/
+
+# Cross-compiled binaries if built in-tree
+kibitz-offline
+kibitz-offline-*
+*.exe
+*.aar
+
+# A running hub's persisted identity + emitted link
+relay-state.json
+relay-link.txt
