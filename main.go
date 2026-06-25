@@ -45,7 +45,9 @@ func main() {
 	advertise := flag.String("advertise", "", "address to advertise in the blob (default: detected LAN IPs)")
 	base := flag.String("base", relaycore.DefaultLinkBase, "site for the printed ?galaxy= link (e.g. https://kibitz.chat)")
 	httpPort := flag.Int("http", 8080, "serve the QR page on this TCP port for headless setup (0 = off)")
+	fixedId := flag.Bool("fixed-id", false, "use the FIXED well-known identity so browsers DISCOVER this hub with no QR (open on the LAN; for a dedicated appliance like the Pi). The link stays permanent on a static IP.")
 	flag.Parse()
+	relaycore.FixedIdentity = *fixedId
 
 	relay, err := relaycore.Start(relaycore.Config{
 		Port: *portFlag, StatePath: *statePath, Advertise: *advertise, LinkBase: *base, HTTPPort: *httpPort,

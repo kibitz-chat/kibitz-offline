@@ -33,6 +33,10 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/sctp"
 	"github.com/pion/stun/v3"
+	"github.com/pion/turn/v4"
+	"github.com/wlynxg/anet" // Android-safe interface enumeration: net.InterfaceAddrs()/Interfaces() return EMPTY
+	//                          on Android 11+ (the OS blocks the RTM_GETLINK netlink call), so we'd find no LAN
+	//                          address even on Wi-Fi. anet uses getifaddrs (cgo) and works there.
 )
 
 // Alphanumeric subset of RFC ice-chars: keeps the blob URL-safe so the
@@ -63,6 +67,15 @@ type identity struct {
 }
 
 func loadOrCreateIdentity(path string) (*identity, tls.Certificate, error) {
+	if FixedIdentity {
+		// Zero-input discovery: every relay shares one well-known identity so a browser can find + connect with
+		// nothing handed to it (see fixedid.go). No persistence — the identity is a constant.
+		cert, err := tls.X509KeyPair([]byte(fixedCertPEM), []byte(fixedKeyPEM))
+		if err != nil {
+			return nil, tls.Certificate{}, fmt.Errorf("fixed identity: %w", err)
+		}
+		return &identity{Ufrag: fixedUfrag, Pwd: fixedPwd, CertPEM: fixedCertPEM, KeyPEM: fixedKeyPEM}, cert, nil
+	}
 	if raw, err := os.ReadFile(path); err == nil {
 		var id identity
 		if json.Unmarshal(raw, &id) == nil && id.Ufrag != "" {
@@ -154,7 +167,9 @@ func (c *vconn) SetWriteDeadline(t time.Time) error        { return nil }
 // ---- hub: ids + routing ------------------------------------------------------
 
 type peer struct {
-	id int
+	id   int
+	room string // multi-room: peers/to routing is scoped to this room. "" = the single shared room — a client
+	//              that never sends "join" stays in it, so old clients (e.g. iwhist) are unchanged (back-compat).
 	dc *datachannel.DataChannel
 	mu sync.Mutex
 }
@@ -205,6 +220,41 @@ func (h *hub) ids() []int {
 	return out
 }
 
+// --- multi-room: peers/to are scoped to a room so one relay carries many independent calls ---
+
+// setRoom assigns a peer to a room (the "join" frame). Guarded by the same lock as the peers map so
+// other peers' room reads (idsInRoom/dstInRoom) are race-free.
+func (h *hub) setRoom(p *peer, room string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	p.room = room
+}
+
+// idsInRoom returns the ids of peers in `room` only — the room-scoped twin of ids(), so a "peers"
+// discovery never reveals members of OTHER rooms on the same relay.
+func (h *hub) idsInRoom(room string) []int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]int, 0, len(h.peers))
+	for id, pr := range h.peers {
+		if pr.room == room {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// dstInRoom returns peer `id` only if it shares `room` — so a "to" can't cross rooms even if an id
+// were guessed (room isolation is enforced, not just hidden by discovery scoping).
+func (h *hub) dstInRoom(id int, room string) *peer {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if d := h.peers[id]; d != nil && d.room == room {
+		return d
+	}
+	return nil
+}
+
 func (h *hub) serve(p *peer) {
 	defer func() {
 		h.remove(p.id)
@@ -220,6 +270,7 @@ func (h *hub) serve(p *peer) {
 		var msg struct {
 			T       string          `json:"t"`
 			ID      int             `json:"id"`
+			Room    string          `json:"room"`
 			Payload json.RawMessage `json:"payload"`
 			X       json.RawMessage `json:"x"`
 		}
@@ -229,10 +280,15 @@ func (h *hub) serve(p *peer) {
 		switch msg.T {
 		case "echo":
 			p.send(map[string]any{"t": "echo", "x": msg.X})
+		case "join":
+			// multi-room: scope this peer to a room. A client sends this once (right after it gets its
+			// "id", before "peers"). Omitted → the peer stays in the default room "" (back-compat with
+			// old single-room clients), so one relay can now carry many independent calls at once.
+			h.setRoom(p, msg.Room)
 		case "peers":
-			p.send(map[string]any{"t": "peers", "ids": h.ids()})
+			p.send(map[string]any{"t": "peers", "ids": h.idsInRoom(p.room)})
 		case "to":
-			if dst := h.get(msg.ID); dst != nil {
+			if dst := h.dstInRoom(msg.ID, p.room); dst != nil { // same-room only → room isolation
 				dst.send(map[string]any{"t": "from", "id": p.id, "payload": msg.Payload})
 			}
 		}
@@ -267,6 +323,7 @@ type Relay struct {
 	httpPort int
 	mdns     *mdns.Conn
 	mdnsName string
+	turnSrv  *turn.Server // LAN TURN so offline MEDIA relays through the hub (nil if it couldn't start)
 }
 
 // MDNSName returns the published `.local` name (resilient fallback candidate),
@@ -303,6 +360,61 @@ func (r *Relay) Stop() {
 		_ = r.sock.Close()
 		r.sock = nil
 	}
+	if r.turnSrv != nil {
+		_ = r.turnSrv.Close()
+		r.turnSrv = nil
+	}
+}
+
+const turnRealm = "kibitz" // TURN auth realm; the web uses long-term creds so the realm just has to match.
+
+// startTurn brings up a LAN TURN server (pion/turn) so OFFLINE media can RELAY THROUGH THE HUB. Offline media
+// is otherwise peer-to-peer with iceServers:[] (host candidates only), and an iPhone + an Android can't resolve
+// each other's mDNS `.local` host candidates -> presence connects but audio/video never does. The hub already
+// has a real LAN IP both phones reach for presence, so relaying media through it is the robust path. Fresh
+// random credential per run, carried in the g2 blob. Best-effort: returns srv=nil on any failure so the caller
+// emits a g1 blob and peers fall back to direct media. Binds a random high UDP port (no fixed-port conflicts).
+func startTurn(relayIP string) (port int, user, pass string, srv *turn.Server) {
+	ip := net.ParseIP(relayIP)
+	if ip == nil {
+		return 0, "", "", nil
+	}
+	// Fixed identity → a fixed TURN port + cred so the browser knows the media relay without being told.
+	bindAddr := "0.0.0.0:0"
+	if FixedIdentity {
+		bindAddr = fmt.Sprintf("0.0.0.0:%d", fixedTurnPort)
+	}
+	conn, err := net.ListenPacket("udp4", bindAddr)
+	if err != nil {
+		return 0, "", "", nil
+	}
+	port = conn.LocalAddr().(*net.UDPAddr).Port
+	user, pass = randIce(10), randIce(18)
+	if FixedIdentity {
+		user, pass = fixedTurnUser, fixedTurnPass
+	}
+	key := turn.GenerateAuthKey(user, turnRealm, pass)
+	s, err := turn.NewServer(turn.ServerConfig{
+		Realm: turnRealm,
+		AuthHandler: func(u, _ string, _ net.Addr) ([]byte, bool) {
+			if u == user {
+				return key, true
+			}
+			return nil, false
+		},
+		PacketConnConfigs: []turn.PacketConnConfig{{
+			PacketConn: conn,
+			RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{
+				RelayAddress: ip,        // advertise the hub's LAN IP for relayed transports
+				Address:      "0.0.0.0", // listen for relayed sockets on all interfaces
+			},
+		}},
+	})
+	if err != nil {
+		_ = conn.Close()
+		return 0, "", "", nil
+	}
+	return port, user, pass, s
 }
 
 // Start binds the socket, builds the permanent blob, launches the packet loop in
@@ -346,7 +458,7 @@ func Start(cfg Config) (*Relay, error) {
 	if cfg.Advertise != "" {
 		addrs = append(addrs, cfg.Advertise)
 	} else {
-		ifaces, _ := net.InterfaceAddrs()
+		ifaces, _ := anet.InterfaceAddrs() // anet (not net): net.InterfaceAddrs() is empty on Android 11+
 		for _, a := range ifaces {
 			if ipn, ok := a.(*net.IPNet); ok {
 				ip4 := ipn.IP.To4()
@@ -385,13 +497,23 @@ func Start(cfg Config) (*Relay, error) {
 	if mdnsErr == nil {
 		eps = append(eps, fmt.Sprintf("%s~%d", name, port))
 	}
-	blob := strings.Join(append([]string{"g1", id.Ufrag, id.Pwd, b64url(fp)}, eps...), "|")
+	// LAN TURN so MEDIA can relay through the hub (see startTurn). g2 carries `<port>,<user>,<pass>` as field
+	// 5; the TURN listens on all interfaces, so the web aims it at each raw-IP endpoint. Best-effort: a
+	// bind/setup failure falls back to g1 (no TURN -> peers attempt direct media, the old behavior).
+	turnPort, turnUser, turnPass, turnSrv := startTurn(addrs[0])
+	var blob string
+	if turnSrv != nil {
+		turnSpec := fmt.Sprintf("%d,%s,%s", turnPort, turnUser, turnPass)
+		blob = strings.Join(append([]string{"g2", id.Ufrag, id.Pwd, b64url(fp), turnSpec}, eps...), "|")
+	} else {
+		blob = strings.Join(append([]string{"g1", id.Ufrag, id.Pwd, b64url(fp)}, eps...), "|")
+	}
 
 	linkBase := cfg.LinkBase
 	if linkBase == "" {
 		linkBase = DefaultLinkBase
 	}
-	r := &Relay{port: port, addrs: addrs, blob: blob, linkBase: linkBase, sock: sock, mdns: mdnsConn}
+	r := &Relay{port: port, addrs: addrs, blob: blob, linkBase: linkBase, sock: sock, mdns: mdnsConn, turnSrv: turnSrv}
 	if mdnsErr == nil {
 		r.mdnsName = name
 	}

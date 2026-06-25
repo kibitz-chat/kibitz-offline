@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/pion/mdns/v2"
+	"github.com/wlynxg/anet" // net.Interfaces() is empty on Android 11+ (see relay.go) → use anet
 	"golang.org/x/net/ipv4"
 )
 
@@ -66,7 +67,7 @@ func startMDNS(name string) (*mdns.Conn, error) {
 	// Best-effort join on every multicast interface so we receive cross-host
 	// queries (pion/mdns also joins internally; errors here are non-fatal).
 	group := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251)}
-	ifis, _ := net.Interfaces()
+	ifis, _ := anet.Interfaces() // anet (not net): empty on Android 11+
 	for i := range ifis {
 		ifi := ifis[i]
 		if ifi.Flags&net.FlagMulticast != 0 && ifi.Flags&net.FlagUp != 0 {

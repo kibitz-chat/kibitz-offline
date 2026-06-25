@@ -26,6 +26,9 @@ func Start(stateDir string, port int, linkBase string) (string, error) {
 	if current != nil {
 		return current.Link(), nil
 	}
+	// The phone IS the LAN hub → use the fixed, well-known identity so a guest's browser can discover + connect
+	// with nothing handed to it (zero-input, no QR). See relaycore/fixedid.go for the trade-off.
+	relaycore.FixedIdentity = true
 	r, err := relaycore.Start(relaycore.Config{Port: port, StatePath: stateDir + "/relay-state.json", LinkBase: linkBase})
 	if err != nil {
 		return "", err
