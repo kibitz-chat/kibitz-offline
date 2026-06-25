@@ -55,11 +55,17 @@ which becomes the `?galaxy=…` in the join link / QR. The web app reconstructs
 the hub's side of the handshake *locally* from that blob — so there's **zero
 per-session signaling**. Scan once, connect forever.
 
+**Or no scanning at all.** By default the hub uses one *well-known* identity, so a phone or laptop
+already on the Wi-Fi can just tap **"Find a nearby call"** and the browser **discovers** the hub by
+probing the LAN for it — no QR, no link. The QR/link still works as before; pass `--fixed-id=false`
+if you'd rather the hub be reachable *only* via its code. (Trade-off: a well-known identity means the
+hub is **open** on that Wi-Fi — fine for a trusted network. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).)
+
 ---
 
 ## Quick start
 
-> **Preview binaries (v0.1.0).** These first public builds aren't fully tested on
+> **Preview binaries (v0.2.0).** These builds aren't fully tested on
 > every OS yet — Windows, macOS and Raspberry Pi are still unverified. Treat them
 > as a preview and please [report what works or breaks](../../issues). Want to be
 > certain what you run? [Build from source](#build-from-source) — same one command.
@@ -120,6 +126,8 @@ Cross-compile every target into `dist/` (the files shipped on Releases):
 Useful flags:
 
 ```
+--fixed-id     use the well-known identity so browsers discover the hub with NO QR
+               (default ON; --fixed-id=false → a unique per-relay identity, QR/link only)
 --port N       fixed UDP port (default: saved identity, else a free port)
 --state PATH   where to persist the permanent identity (default ./relay-state.json)
 --base URL     site the printed link points at (default https://kibitz.chat)
@@ -135,10 +143,12 @@ setup (it ships in every release too).
 
 ## Android
 
-The hub also runs as an Android app, so a spare phone becomes the box — it can
-keep running across reboots. That app ships through the kibitz.chat Offline-mode
-page (Play Store listing pending); the same `mobile/` package here is what it binds
-via [gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile).
+The hub also runs as an **Android app** (`kibitz-offline-android.apk` on the
+[Releases](../../releases/latest) page) — a spare phone becomes the box and keeps running across
+reboots. The app **bundles the web client**, so it **cold-starts the call UI with no internet at all**
+(no "load it online once" first). The same `mobile/` package here is what it binds via
+[gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile); the APK itself is built in the kibitz
+repo (the Android shell). Play Store listing pending.
 
 ---
 

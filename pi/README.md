@@ -35,6 +35,13 @@ curl http://localhost:8080/link
 Print/laminate that QR and stick it on the wall. New guests scan it once; after
 that they just open kibitz.chat on this Wi-Fi and they're in the call.
 
+> **Repeat guests don't even scan.** The relay uses the *well-known* identity by default, so anyone
+> already on this Wi-Fi who has opened kibitz.chat before can just tap **"Find a nearby call"** and
+> their browser **discovers** the Pi — no QR. The printed QR is for first-timers (whose browser hasn't
+> cached the app yet) and as a fallback. Want the Pi reachable *only* via its code? Add `--fixed-id=false`
+> to the service's `ExecStart`. (A well-known identity means the hub is open on this Wi-Fi — fine for a
+> trusted network.)
+
 ## Reboot behaviour
 - **Identity (the code): survives** — persisted in `/var/lib/kibitz-offline`.
 - **Process: auto-restarts** — that's what this service is for.
