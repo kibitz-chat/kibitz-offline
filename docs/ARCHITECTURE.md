@@ -94,11 +94,15 @@ that made offline media actually work on iPhone↔Android.
 
 ## 6. Fixed identity + zero‑input discovery (no QR)
 
-The QR/link works, but the nicer flow is **zero input**: a guest opens the site and it *finds*
-the hub. That needs the hub's IP + ICE creds + DTLS **fingerprint** to bootstrap WebRTC — and a
-browser **can't** do the obvious "type the IP, HTTP‑probe it" because an HTTPS page → `http://LAN‑IP`
-is **mixed content** (blocked) and a LAN IP can't get a cert. **WebRTC isn't subject to mixed
-content**, so we probe via WebRTC — but only if the browser already knows the fingerprint to pin.
+The link works, but it can't help the **first** person — a *creator* who wants to start a call on a
+hub that **isn't their own device** (a dedicated or headless relay, with no screen to scan a QR off).
+For them, discovery bootstraps onto the hub with **zero prior info**. That's the *only* job it does:
+everyone the creator then invites gets a link that already names the hub, so guests never discover —
+and there is deliberately **no "browse and join a nearby call"** (a room is reached only by its link).
+Discovery needs the hub's IP + ICE creds + DTLS **fingerprint** to bootstrap WebRTC — and a browser
+**can't** do the obvious "type the IP, HTTP‑probe it" because an HTTPS page → `http://LAN‑IP` is
+**mixed content** (blocked) and a LAN IP can't get a cert. **WebRTC isn't subject to mixed content**,
+so we probe via WebRTC — but only if the browser already knows the fingerprint to pin.
 
 **Solution — one well‑known identity.** Every hub can run the **same fixed** ICE creds + DTLS cert
 (`relaycore/fixedid.go`), and the web bakes in the **same constants** (`src/core/hubDiscover.ts`,
