@@ -103,8 +103,9 @@ content**, so we probe via WebRTC — but only if the browser already knows the 
 **Solution — one well‑known identity.** Every hub can run the **same fixed** ICE creds + DTLS cert
 (`relaycore/fixedid.go`), and the web bakes in the **same constants** (`src/core/hubDiscover.ts`,
 must match `fixedid.go`). Discovery then = probe the LAN with that identity; whoever answers is the
-hub. Gated by `FixedIdentity` (Android binding + the desktop `--fixed-id` flag), so the CLI default
-stays random unless asked.
+hub. Gated by `FixedIdentity`: the Android binding sets it, and the desktop/Pi CLI `--fixed-id` flag **defaults ON**
+(a double‑clicked hub can't pass flags, and the point is to be discoverable); `--fixed-id=false` → a unique
+per‑relay identity (dev, or a relay reachable only via its QR/link).
 
 The probe (`hubDiscover.ts`):
 1. **`localSubnets()`** — grab the mic briefly (iOS only reveals the raw LAN IP after a media grant),
