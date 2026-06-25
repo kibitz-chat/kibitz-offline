@@ -2,6 +2,9 @@
 
 **Browser video calls for everyone on one Wi-Fi — with no internet, no accounts, and nothing to install.**
 
+> 📐 **How it all works** — the protocol, the offline media path, zero‑input discovery, and the
+> Android/desktop/Pi hosts: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 A plane. A cabin with dead cell signal. An event hall with no guest internet. An
 office that won't give you the Wi-Fi password. Run this tiny program on **one**
 device on the local network — the **LAN hub** — and everyone else just opens
