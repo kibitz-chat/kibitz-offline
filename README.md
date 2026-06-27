@@ -28,16 +28,19 @@ the browsers find each other.
 - **Open source, MIT.** Everything that runs is in this repo. Don't trust the
   prebuilt binary? Build it yourself in one command (below) — it's a single
   static Go program, no network calls home, no telemetry.
-- **The hub can't see or hear your audio/video.** Voice and video are a
-  peer-to-peer WebRTC mesh, encrypted end-to-end (DTLS-SRTP) and flowing
-  browser-to-browser — the hub only helps the browsers find each other; it
-  never carries, decrypts, records, or joins your media.
+- **The hub can't see or hear your audio/video.** Voice and video are a WebRTC
+  mesh, encrypted end-to-end (DTLS-SRTP). Where browsers reach each other directly
+  the media flows browser-to-browser and the hub only introduces them; on a phone
+  Wi-Fi (where iOS/mDNS breaks direct links) the media instead **relays through the
+  hub's LAN TURN** — but either way the hub only ever sees **ciphertext**: it carries
+  the encrypted packets and can never decrypt, record, or join your media.
 - **It sees *who's* in the call — not *what* you say.** Be precise: the hub is the
   **coordination point**, so it carries the presence/roster beacons (who's connected,
-  their names) and the WebRTC handshakes that let the browsers find each other — that's
-  the metadata it sees. But your **content — chat and app messages — goes
-  peer-to-peer between the browsers over the LAN, *not* through the hub** (exactly like
-  the audio and video), so the hub can't read it either. And because it's a box *you*
+  their names) and the WebRTC handshakes that pair the browsers up — that's the
+  metadata it sees. But your **content — chat, co-browse, and app messages — is
+  end-to-end encrypted** exactly like the audio and video: direct browser-to-browser
+  when they can reach each other, or **relayed through the hub's TURN as ciphertext** on
+  a phone Wi-Fi — never readable by the hub either way. And because it's a box *you*
   run on *your own* Wi-Fi, even that presence metadata never leaves your network — there's
   no operator but you. (As the coordination point it could, like any signaling server, try to
   interfere with how browsers pair up — the in-call safety code is what catches that.)
@@ -55,11 +58,16 @@ which becomes the `?galaxy=…` in the join link / QR. The web app reconstructs
 the hub's side of the handshake *locally* from that blob — so there's **zero
 per-session signaling**. Scan once, connect forever.
 
-**Or no scanning at all.** By default the hub uses one *well-known* identity, so a phone or laptop
-already on the Wi-Fi can just tap **"Find a nearby call"** and the browser **discovers** the hub by
-probing the LAN for it — no QR, no link. The QR/link still works as before; pass `--fixed-id=false`
-if you'd rather the hub be reachable *only* via its code. (Trade-off: a well-known identity means the
-hub is **open** on that Wi-Fi — fine for a trusted network. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).)
+**Or no scanning at all — when you *start* a call.** By default the hub uses one *well-known*
+identity, so a **creator** whose hub is a headless box (a Pi or a laptop relay with no screen to scan
+a QR off) can tap **"📡 Host on this Wi-Fi"** and the browser **discovers** the hub by probing the LAN
+for it — no QR, no link. That's discovery's *only* job: bootstrapping the creator onto a hub. Everyone
+they then invite gets a link that already names the hub, so **guests never discover** — and there is
+deliberately **no "browse and join a nearby call"**: a room is reached only by its un-guessable link,
+so no one else on the Wi-Fi can wander into your call. Pass `--fixed-id=false` if you'd rather the hub
+be reachable *only* via its own code. (Trade-off: a well-known identity means the hub is **open** on
+that Wi-Fi — fine for a trusted network; reaching the open hub still isn't joining a call, which the
+room id gates. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).)
 
 ---
 
